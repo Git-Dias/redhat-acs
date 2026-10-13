@@ -1,0 +1,24 @@
+CATEGORIES="Privileges,Vulnerability Management"   # comma-separated, edit this line only
+
+curl -sk -H "Authorization: Bearer $ROX_API_TOKEN" -G "https://$ROX_ENDPOINT/v1/alerts" \
+  --data-urlencode "query=Violation State:ACTIVE+Category:${CATEGORIES}" \
+  --data-urlencode 'pagination.limit=1000' \
+| jq -r --arg cats "$CATEGORIES" '
+  ($cats | split(",") | map(sub("^ +";"") | sub(" +$";"") | ascii_downcase)) as $want
+  | (["alert_id","time","state","policy","severity","categories",
+      "cluster","namespace","resource_type","resource","stage"],
+     (.alerts[]
+      | select((.deployment.inactive // false) == false)
+      | select(((.policy.categories // []) | map(ascii_downcase)) as $have
+               | any($want[]; . as $w | ($have | index($w)) != null))
+      | [
+        .id, .time, .state,
+        .policy.name,
+        ((.policy.severity // "") | sub("_SEVERITY$";"")),
+        ((.policy.categories // []) | join("; ")),
+        .commonEntityInfo.clusterName,
+        .commonEntityInfo.namespace,
+        .commonEntityInfo.resourceType,
+        (.deployment.name // .resource.name // .node.name // "-"),
+        .lifecycleStage
+     ])) | @csv' > violations.csv
